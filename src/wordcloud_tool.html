@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Word Cloud Tool (DOCX or Ranked CSV)</title>
+  <style>
+    :root { --bg:#0b0f14; --panel:#111824; --text:#e7eefc; --muted:#9bb0d1; --line:#1f2a3a; --accent:#7aa7ff; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:18px 20px; border-bottom:1px solid var(--line); background:linear-gradient(180deg, #0f1622, #0b0f14); }
+    h1 { margin:0; font-size:18px; letter-spacing:.2px; }
+    main { display:grid; grid-template-columns: 420px 1fr; gap:14px; padding:14px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 8px 28px rgba(0,0,0,.25); }
+    .card h2 { margin:0 0 10px 0; font-size:14px; color:var(--muted); font-weight:600; letter-spacing:.3px; text-transform:uppercase; }
+    label { display:block; font-size:12px; color:var(--muted); margin:10px 0 6px; }
+    input[type="file"], input[type="number"], input[type="text"], textarea, select {
+      width:100%; box-sizing:border-box; padding:10px; border-radius:10px; border:1px solid var(--line);
+      background:#0c121c; color:var(--text); outline:none;
+    }
+    textarea { min-height:120px; resize:vertical; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    button {
+      cursor:pointer; border:1px solid var(--line); background:#0c121c; color:var(--text);
+      padding:10px 12px; border-radius:12px; font-weight:600;
+    }
+    button.primary { background:var(--accent); border-color:transparent; color:#07101f; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .muted { color:var(--muted); font-size:12px; line-height:1.35; }
+    .pill { display:inline-block; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+    #cloudWrap { display:flex; flex-direction:column; gap:10px; }
+    #cloud { border:1px dashed rgba(122,167,255,.35); border-radius:14px; background:#0c121c; padding:10px; }
+    #cloud svg { width:100%; height:560px; display:block; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { border-bottom:1px solid var(--line); padding:8px 6px; text-align:left; }
+    th { color:var(--muted); font-weight:700; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .controls > * { flex: 0 0 auto; }
+    .spacer { height:8px; }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Local Word Cloud Tool <span class="pill">DOCX → ranked list → cloud</span> <span class="pill">CSV → cloud</span> <span class="pill">SVG/PNG export</span></h1>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1) Input</h2>
+
+    <label>Load DOCX (client-side parsing)</label>
+    <input id="docxFile" type="file" accept=".docx" />
+
+    <div class="spacer"></div>
+
+    <label>OR load Ranked CSV (columns: word,count)</label>
+    <input id="csvFile" type="file" accept=".csv,text/csv" />
+
+    <div class="spacer"></div>
+
+    <h2>2) Filters</h2>
+
+    <div class="row">
+      <div>
+        <label>Top N words (after filtering)</label>
+        <input id="topN" type="number" min="10" max="2000" value="150" />
+      </div>
+      <div>
+        <label>Min word length</label>
+        <input id="minLen" type="number" min="1" max="20" value="3" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Remove years (e.g., 1987 / 2024)</label>
+        <select id="removeYears">
+          <option value="yes" selected>Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+      <div>
+        <label>Drop numbers-only tokens</label>
+        <select id="dropNumbers">
+          <option value="yes" selected>Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    </div>
+
+    <label>Stopwords (comma or newline separated)</label>
+    <textarea id="stopwords"></textarea>
+    <div class="muted">
+      Tip: Add domain-specific “junk” words here (e.g., <code>study</code>, <code>characterization</code>, <code>development</code>).
+      You can also remove important words by deleting them from this list.
+    </div>
+
+    <div class="spacer"></div>
+
+    <h2>3) Typography</h2>
+
+    <label>Font for word cloud</label>
+    <select id="fontFamily">
+      <option value="system-ui" selected>Browser default (system-ui)</option>
+      <option value="Helvetica">Helvetica</option>
+      <option value="Arial">Arial</option>
+      <option value="Calibri">Calibri</option>
+      <option value="Times New Roman">Times New Roman</option>
+      <option value="Georgia">Georgia</option>
+      <option value="Verdana">Verdana</option>
+    </select>
+
+    <label>Custom font name (optional)</label>
+    <input id="customFont" type="text" placeholder="e.g., Inter, Helvetica Neue, Source Sans 3" />
+    <div class="muted">
+      Uses an installed font on your system. If the font isn’t available, the browser (or Illustrator) will fall back.
+      Note: SVG export replaces <code>system-ui</code> with <code>Helvetica</code> for Illustrator compatibility.
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="controls">
+      <button class="primary" id="buildFromDocx" disabled>Build list from DOCX</button>
+      <button class="primary" id="buildFromCsv" disabled>Build cloud from CSV</button>
+      <button id="exportCsv" disabled>Export ranked CSV</button>
+      <button id="exportSvg" disabled>Export SVG</button>
+      <button id="exportPng" disabled>Export PNG</button>
+      <button id="clear">Clear</button>
+    </div>
+
+    <div class="spacer"></div>
+    <div class="muted" id="status">Load a DOCX or CSV to begin.</div>
+  </section>
+
+  <section class="card" id="cloudWrap">
+    <h2>Word Cloud + Ranked List</h2>
+    <div id="cloud">
+      <svg id="svg"></svg>
+    </div>
+    <div class="row">
+      <div class="card" style="padding:10px; border-radius:14px;">
+        <h2 style="margin-bottom:8px;">Ranked words</h2>
+        <div class="muted" id="counts"></div>
+        <div style="max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:12px; margin-top:8px;">
+          <table id="rankTable">
+            <thead><tr><th>Word</th><th>Count</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="padding:10px; border-radius:14px;">
+        <h2 style="margin-bottom:8px;">Extracted text (DOCX)</h2>
+        <div class="muted">Shown only when you load a DOCX.</div>
+        <textarea id="extracted" readonly style="min-height:260px;"></textarea>
+      </div>
+    </div>
+
+    <div class="muted">
+      Rendering uses <code>d3-cloud</code> layout. For fully offline use, download the JS files and change the script tags to local paths.
+    </div>
+  </section>
+</main>
+
+<!-- Libraries (CDN). For offline: download and point these to local files. -->
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://unpkg.com/d3-cloud/build/d3.layout.cloud.js"></script>
+<script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+
+<script>
+  // ---------- Defaults ----------
+  const DEFAULT_STOPWORDS = [
+    // core English (minimal but effective)
+    "a","an","and","are","as","at","be","been","being","by","can","could","did","do","does","doing","during",
+    "each","few","for","from","further","had","has","have","having","he","her","here","hers","herself","him","himself",
+    "his","how","i","if","in","into","is","it","its","itself","just","me","more","most","my","myself","no","nor","not",
+    "of","off","on","once","only","or","other","our","ours","ourselves","out","over","own","same","she","should","so",
+    "some","such","than","that","the","their","theirs","them","themselves","then","there","these","they","this","those",
+    "through","to","too","under","until","up","very","was","we","were","what","when","where","which","while","who",
+    "whom","why","will","with","you","your","yours","yourself","yourselves",
+    // academic boilerplate (tweak as needed)
+    "study","studies","investigation","investigations","development","analysis","effects","effect","characterization",
+    "techniques","technique","process","processes","processing","properties","behavior","behaviour","mechanisms","mechanism",
+    "influence","influences","influencing","based","using","use","used","application","applications","comparison","comparisons",
+    "modelling","modeling","model","models","simulation","simulations","experimental","numerical",
+    "structure","structural","structures","chemistry","chemical","physical","physics","growth","formation","transformation",
+    "synthesis","fabrication","preparation","new","improved","related","emphasis",
+    "thin","film","films","multilayer","multilayers","oxide","oxides","interface","interfaces","interfacial",
+    "high","low","temperature","temperatures"
+  ];
+
+  const el = (id) => document.getElementById(id);
+
+  const state = {
+    sourceText: "",
+    ranked: [] // [{word,count}]
+  };
+
+  // ---------- UI init ----------
+  el("stopwords").value = DEFAULT_STOPWORDS.join("\n");
+
+  // Default typography
+  el("fontFamily").value = "system-ui";
+  el("customFont").value = "";
+
+  const docxInput = el("docxFile");
+  const csvInput  = el("csvFile");
+  const fontSelect = el("fontFamily");
+  const customFontInput = el("customFont");
+
+  // Re-render cloud when typography changes
+  fontSelect.addEventListener("change", () => {
+    if (!state.ranked.length) return;
+    renderCloud(state.ranked);
+  });
+  customFontInput.addEventListener("input", () => {
+    if (!state.ranked.length) return;
+    renderCloud(state.ranked);
+  });
+
+  docxInput.addEventListener("change", () => {
+    el("buildFromDocx").disabled = !docxInput.files?.length;
+    setStatus(docxInput.files?.length ? `DOCX loaded: ${docxInput.files[0].name}` : "Load a DOCX or CSV to begin.");
+  });
+
+  csvInput.addEventListener("change", () => {
+    el("buildFromCsv").disabled = !csvInput.files?.length;
+    setStatus(csvInput.files?.length ? `CSV loaded: ${csvInput.files[0].name}` : "Load a DOCX or CSV to begin.");
+  });
+
+  el("buildFromDocx").addEventListener("click", async () => {
+    const file = docxInput.files?.[0];
+    if (!file) return;
+
+    setStatus("Parsing DOCX…");
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    state.sourceText = result.value || "";
+    el("extracted").value = state.sourceText.trim();
+
+    setStatus("Building ranked list from DOCX…");
+    state.ranked = buildRankedFromText(state.sourceText);
+    updateRankTable(state.ranked);
+    renderCloud(state.ranked);
+
+    const has = state.ranked.length > 0;
+    el("exportCsv").disabled = !has;
+    el("exportSvg").disabled = !has;
+    el("exportPng").disabled = !has;
+
+    setStatus(`Done. Ranked words: ${state.ranked.length}`);
+  });
+
+  el("buildFromCsv").addEventListener("click", async () => {
+    const file = csvInput.files?.[0];
+    if (!file) return;
+
+    setStatus("Reading CSV…");
+    const text = await file.text();
+    const ranked = parseRankedCsv(text);
+    state.ranked = applyTopN(ranked);
+
+    updateRankTable(state.ranked);
+    renderCloud(state.ranked);
+
+    const has = state.ranked.length > 0;
+    el("exportCsv").disabled = !has;
+    el("exportSvg").disabled = !has;
+    el("exportPng").disabled = !has;
+
+    setStatus(`Done. Loaded words: ${state.ranked.length}`);
+  });
+
+  el("exportCsv").addEventListener("click", () => {
+    if (!state.ranked.length) return;
+    const rows = [["word","count"], ...state.ranked.map(d => [d.word, d.count])];
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replaceAll('"','""')}"`).join(",")).join("\n");
+    downloadText(csv, "ranked_words.csv", "text/csv");
+  });
+
+  el("exportSvg").addEventListener("click", () => {
+    if (!state.ranked.length) return;
+    exportWordCloudSvg("wordcloud.svg");
+  });
+
+  el("exportPng").addEventListener("click", async () => {
+    if (!state.ranked.length) return;
+    // Tweak output size / scale as desired (e.g., 2400x1350 @2 gives very crisp slide graphics)
+    await exportWordCloudPng("wordcloud.png", 2400, null, 2);
+  });
+
+  el("clear").addEventListener("click", () => {
+    docxInput.value = "";
+    csvInput.value = "";
+    el("buildFromDocx").disabled = true;
+    el("buildFromCsv").disabled = true;
+    el("exportCsv").disabled = true;
+    el("exportSvg").disabled = true;
+    el("exportPng").disabled = true;
+    el("extracted").value = "";
+    state.sourceText = "";
+    state.ranked = [];
+    updateRankTable([]);
+    clearCloud();
+    setStatus("Cleared.");
+  });
+
+  // ---------- Core logic ----------
+  function getStopwordsSet() {
+    const raw = el("stopwords").value || "";
+    const parts = raw.split(/[\n,]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    return new Set(parts);
+  }
+
+  function normalizeText(s) {
+    // convert common unicode subscripts/superscripts to ascii digits
+    const subMap = { "₀":"0","₁":"1","₂":"2","₃":"3","₄":"4","₅":"5","₆":"6","₇":"7","₈":"8","₉":"9",
+                     "⁰":"0","¹":"1","²":"2","³":"3","⁴":"4","⁵":"5","⁶":"6","⁷":"7","⁸":"8","⁹":"9" };
+    s = s.replace(/[₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹]/g, ch => subMap[ch] || ch);
+
+    // strip common bracketed metadata like [Subscript …]
+    s = s.replace(/\[[^\]]*\]/g, " ");
+
+    // remove years optionally
+    if (el("removeYears").value === "yes") {
+      s = s.replace(/\b(19|20)\d{2}\b/g, " ");
+    }
+
+    // punctuation -> spaces (keep internal alphanumerics like SiO2, YBa2Cu3O7)
+    s = s.replace(/[“”"’']/g, "");
+    s = s.replace(/[/,:;.!?]/g, " ");
+    s = s.replace(/[-–—]/g, " ");
+    s = s.replace(/\s+/g, " ").trim();
+    return s;
+  }
+
+  function buildRankedFromText(text) {
+    const minLen = clampInt(el("minLen").value, 1, 50);
+    const dropNumbers = el("dropNumbers").value === "yes";
+    const stop = getStopwordsSet();
+
+    const counts = new Map();
+    const normalized = normalizeText(text);
+
+    for (const tok of normalized.split(/\s+/)) {
+      if (!tok) continue;
+      const w = tok.toLowerCase();
+
+      if (dropNumbers && /^\d+$/.test(w)) continue;
+      if (w.length < minLen) continue;
+      if (stop.has(w)) continue;
+      if (/^[ivxlcdm]+$/.test(w)) continue; // roman numerals
+
+      counts.set(w, (counts.get(w) || 0) + 1);
+    }
+
+    const ranked = Array.from(counts.entries())
+      .map(([word, count]) => ({ word, count }))
+      .sort((a,b) => b.count - a.count);
+
+    return applyTopN(ranked);
+  }
+
+  function parseRankedCsv(csvText) {
+    // expects columns: word,count (header optional)
+    const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+
+    const rows = lines.map(l => l.split(",").map(x => x.trim().replace(/^\"(.*)\"$/,'$1')));
+
+    // detect header
+    let start = 0;
+    if (rows[0].length >= 2 && rows[0][0].toLowerCase() === "word") start = 1;
+
+    const out = [];
+    for (let i = start; i < rows.length; i++) {
+      const [wordRaw, countRaw] = rows[i];
+      if (!wordRaw) continue;
+      const count = Number(String(countRaw).replaceAll('"',""));
+      if (!Number.isFinite(count)) continue;
+      out.push({ word: wordRaw.replaceAll('"',"").trim(), count });
+    }
+
+    // sort descending by count
+    out.sort((a,b) => b.count - a.count);
+    return out;
+  }
+
+  function applyTopN(ranked) {
+    const topN = clampInt(el("topN").value, 1, 100000);
+    return ranked.slice(0, topN);
+  }
+
+  function clampInt(v, min, max) {
+    const n = Math.floor(Number(v));
+    if (!Number.isFinite(n)) return min;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  // ---------- Table ----------
+  function updateRankTable(ranked) {
+    const tbody = el("rankTable").querySelector("tbody");
+    tbody.innerHTML = "";
+    const total = ranked.reduce((s,d) => s + d.count, 0);
+    el("counts").textContent = ranked.length ? `Showing ${ranked.length} words · Total counted tokens: ${total}` : "No ranked list yet.";
+
+    for (const d of ranked.slice(0, 200)) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${escapeHtml(d.word)}</td><td>${d.count}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+  }
+
+  // ---------- Word cloud ----------
+  function clearCloud() {
+    d3.select("#svg").selectAll("*").remove();
+  }
+
+  function renderCloud(ranked) {
+    clearCloud();
+    if (!ranked.length) return;
+
+    const svg = d3.select("#svg");
+    const bbox = svg.node().getBoundingClientRect();
+    const width = Math.max(600, bbox.width || 900);
+    const height = 560;
+
+    svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+    const maxCount = ranked[0].count;
+    const minCount = ranked[ranked.length - 1].count;
+
+    // scale counts -> font sizes
+    const fontScale = d3.scaleSqrt()
+      .domain([Math.max(1, minCount), Math.max(1, maxCount)])
+      .range([12, 86]);
+
+    const words = ranked.map(d => ({
+      text: d.word,
+      size: fontScale(d.count),
+      count: d.count
+    }));
+
+    const fontFamily = getChosenFontFamily();
+    const layoutFont = getLayoutFontName(fontFamily);
+
+    const layout = d3.layout.cloud()
+      .size([width, height])
+      .words(words)
+      .padding(2)
+      .rotate(() => (Math.random() > 0.85 ? 90 : 0))
+      .font(layoutFont)
+      .fontSize(d => d.size)
+      .on("end", draw);
+
+    layout.start();
+
+    function draw(data) {
+      const g = svg.append("g")
+        .attr("transform", `translate(${width/2},${height/2})`);
+
+      g.selectAll("text")
+        .data(data)
+        .enter().append("text")
+          .style("font-size", d => `${d.size}px`)
+          .style("font-family", fontFamily)
+          .attr("text-anchor", "middle")
+          .attr("transform", d => `translate(${d.x},${d.y})rotate(${d.rotate})`)
+          .text(d => d.text)
+          .append("title")
+            .text(d => `${d.text}: ${d.count}`);
+    }
+  }
+
+  // ---------- Typography helpers ----------
+  function getChosenFontFamily() {
+    const custom = (el("customFont").value || "").trim();
+    const pick = (el("fontFamily").value || "system-ui").trim();
+    // If user types a stack (with commas), we keep it as-is.
+    return custom || pick;
+  }
+
+  function getLayoutFontName(fontFamily) {
+    // d3-cloud expects a single font name; if a stack is provided, use the first.
+    const first = String(fontFamily).split(",")[0].trim();
+    return first.replace(/^['\"]|['\"]$/g, "") || "Helvetica";
+  }
+
+  // ---------- Export (SVG + PNG) ----------
+  function getInlineSvgString() {
+    const svgEl = el("svg");
+    if (!svgEl) throw new Error("SVG element not found.");
+
+    // Clone to avoid mutating live SVG
+    const clone = svgEl.cloneNode(true);
+
+    // Ensure namespaces (helps Illustrator / Inkscape / PowerPoint imports)
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+
+    // Ensure viewBox exists
+    if (!clone.getAttribute("viewBox")) {
+      const w = clone.clientWidth || 1000;
+      const h = clone.clientHeight || 600;
+      clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    }
+
+    // Help SVG-to-canvas rasterization by setting explicit width/height that match the viewBox.
+    const vbParts = clone.getAttribute("viewBox").trim().split(/\s+/).map(Number);
+    if (vbParts.length >= 4 && Number.isFinite(vbParts[2]) && Number.isFinite(vbParts[3])) {
+      clone.setAttribute("width", String(vbParts[2]));
+      clone.setAttribute("height", String(vbParts[3]));
+    }
+
+    const serializer = new XMLSerializer();
+    let svgText = serializer.serializeToString(clone);
+
+    // Illustrator often errors on CSS generic font keyword "system-ui".
+    // Replace it in the exported SVG with a broadly available font name.
+    svgText = svgText.replaceAll("system-ui", "Helvetica");
+
+    if (!svgText.startsWith("<?xml")) {
+      svgText = `<?xml version="1.0" encoding="UTF-8"?>\n` + svgText;
+    }
+    return svgText;
+  }
+
+  function exportWordCloudSvg(filename) {
+    const svgText = getInlineSvgString();
+    downloadText(svgText, filename || "wordcloud.svg", "image/svg+xml;charset=utf-8");
+  }
+
+  async function exportWordCloudPng(filename, outW, outH = null, scale = 2) {
+    // Preserve aspect ratio using the SVG viewBox (prevents horizontal/vertical squish).
+    const { vbW, vbH } = getSvgViewBoxDims();
+
+    const targetW = Number(outW) || vbW;
+    const targetH = (outH == null) ? Math.round(targetW * (vbH / vbW)) : Number(outH);
+
+    const svgText = getInlineSvgString();
+
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.decoding = "async";
+
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(targetW * scale);
+    canvas.height = Math.floor(targetH * scale);
+
+    const ctx = canvas.getContext("2d");
+
+    // Transparent background by default. If you want solid, uncomment:
+    // ctx.fillStyle = "#0c121c";
+    // ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // "Contain" fit: scale uniformly and center (no distortion).
+    const s = Math.min(targetW / vbW, targetH / vbH);
+    const drawW = vbW * s;
+    const drawH = vbH * s;
+    const offX = (targetW - drawW) / 2;
+    const offY = (targetH - drawH) / 2;
+
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.drawImage(img, offX, offY, drawW, drawH);
+
+    URL.revokeObjectURL(url);
+
+    const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    const pngUrl = URL.createObjectURL(pngBlob);
+    const a = document.createElement("a");
+    a.href = pngUrl;
+    a.download = filename || "wordcloud.png";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(pngUrl);
+  }
+
+  function getSvgViewBoxDims() {
+    const svgEl = el("svg");
+    const vb = svgEl?.getAttribute("viewBox") || "0 0 1000 600";
+    const parts = vb.trim().split(/\s+/).map(Number);
+    // viewBox: minX minY width height
+    const vbW = (parts.length >= 4 && Number.isFinite(parts[2])) ? parts[2] : 1000;
+    const vbH = (parts.length >= 4 && Number.isFinite(parts[3])) ? parts[3] : 600;
+    return { vbW, vbH };
+  }
+
+  // ---------- Helpers ----------
+  function setStatus(msg) { el("status").textContent = msg; }
+
+  function downloadText(text, filename, mime) {
+    const blob = new Blob([text], { type: mime || "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+</script>
+</body>
+</html>
